@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: locklens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-locklens_dev_pw}
+      POSTGRES_DB: locklens
+      LAB_PASSWORD: ${LAB_PASSWORD:-locklens_lab_pw}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U locklens"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://locklens:${POSTGRES_PASSWORD:-locklens_dev_pw}@db:5432/locklens
+      # Experiments run ONLY here — separate database, least-privilege lab role (see db/init).
+      LAB_DATABASE_URL: postgresql://locklens_lab:${LAB_PASSWORD:-locklens_lab_pw}@db:5432/locklens_lab
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ENVIRONMENT: production
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:

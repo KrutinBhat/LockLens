@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body { @apply bg-ink-950 text-slate-200 antialiased; }
+
+.sql-editor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px; line-height: 1.6; tab-size: 2;
+}
+.kw { color: #7dd3fc; } .fn { color: #c4b5fd; } .num { color: #fbbf24; } .str { color: #86efac; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { @apply bg-ink-600 rounded-full; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none; } }
+.fade-up { animation: fadeUp .35s ease both; }
+@keyframes pulse-dot { 0%,100% { opacity: 1;} 50% { opacity: .35;} }
+.live-dot { animation: pulse-dot 1.2s ease infinite; }
+.react-flow__handle { display: none; }
