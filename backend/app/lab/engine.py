@@ -510,7 +510,14 @@ class ScheduleEngine:
     def _reset_and_seed(self) -> None:
         conn = _connect_lab(autocommit=True)
         try:
-            conn.execute("CREATE SCHEMA IF NOT EXISTS lab")
+            # The schema is provisioned by an administrator (db/init/01_lab.sql).
+            # The experiment role has CREATE *inside* that schema, but deliberately
+            # cannot create schemas at the database level.
+            exists = conn.execute(
+                "SELECT 1 FROM pg_namespace WHERE nspname = 'lab'"
+            ).fetchone()
+            if not exists:
+                raise RuntimeError("lab schema is not provisioned; run db/init/01_lab.sql as an administrator")
             # drop every table in lab schema for a clean slate
             rows = conn.execute(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'lab'"

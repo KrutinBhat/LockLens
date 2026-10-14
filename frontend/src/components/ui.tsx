@@ -2,7 +2,7 @@ import React from "react";
 import { CheckCircle2, AlertTriangle, XCircle, Info, Loader2, Inbox } from "lucide-react";
 
 export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-ink-600/60 bg-ink-900/80 shadow-lg shadow-black/20 ${className}`}>{children}</div>;
+  return <div className={`rounded-2xl border border-ink-600/60 bg-ink-900/80 shadow-lg shadow-black/20 ${className}`}>{children}</div>;
 }
 
 export function CardHeader({ title, sub, right }: { title: React.ReactNode; sub?: React.ReactNode; right?: React.ReactNode }) {
@@ -89,7 +89,7 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 }
 
 export function Btn({ children, variant = "primary", className = "", ...rest }: any) {
-  const base = "inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40";
+  const base = "inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl px-3.5 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 disabled:cursor-not-allowed disabled:opacity-40";
   const styles: Record<string, string> = {
     primary: "bg-accent text-ink-950 hover:bg-cyan-300",
     ghost: "border border-ink-600 text-slate-300 hover:bg-ink-700",

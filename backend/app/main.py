@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .db import Base, SessionLocal, engine
 from .config import settings
@@ -41,6 +41,24 @@ def seed_library() -> None:
         db.close()
 
 
+def recover_interrupted_runs() -> None:
+    """Close runs that cannot survive an API-process restart.
+
+    Run coordination is intentionally in-process. A worker lost during a
+    deployment must not remain displayed as live forever.
+    """
+    db = SessionLocal()
+    try:
+        db.execute(
+            update(models.ExperimentRun)
+            .where(models.ExperimentRun.status.in_(("queued", "running", "paused")))
+            .values(status="failed", error="interrupted by API restart")
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Alembic is canonical in production. create_all remains a convenience for
@@ -51,6 +69,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("JWT_SECRET must be set to a non-default value in production")
     if settings.environment.lower() == "production" and not settings.cors_origins:
         raise RuntimeError("CORS_ORIGINS must list the production frontend origin")
+    recover_interrupted_runs()
     seed_library()
     yield
 

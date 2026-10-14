@@ -28,6 +28,9 @@ services:
       LAB_DATABASE_URL: postgresql://locklens_lab:${LAB_PASSWORD:-locklens_lab_pw}@db:5432/locklens_lab
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       ENVIRONMENT: production
+      # Local Docker UI origins. Render supplies its public static-site origin
+      # through the service environment instead.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173}
     ports:
       - "8000:8000"
 

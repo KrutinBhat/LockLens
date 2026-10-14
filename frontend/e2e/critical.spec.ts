@@ -16,9 +16,9 @@ test("create account → execute scenario → inspect evidence → export", asyn
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
   await page.goto("/scenarios");
-  const card = page.locator("div", { hasText: "Lost Update" }).last();
-  await expect(page.getByText("Lost Update", { exact: false }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Run" }).first().click();
+  const card = page.locator("div.rounded-2xl", { has: page.getByRole("heading", { name: /Lost Update/i }) });
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Run" }).click();
 
   await expect(page).toHaveURL(/\/runs\/\d+/);
   await expect(page.getByText("anomaly detected", { exact: false })).toBeVisible({ timeout: 60_000 });

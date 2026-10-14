@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root { color-scheme: dark; }
-body { @apply bg-ink-950 text-slate-200 antialiased; }
+body { @apply bg-ink-950 text-slate-200 antialiased; background-image: radial-gradient(circle at 86% -12%, rgba(34, 211, 238, .11), transparent 31rem), radial-gradient(circle at 7% 100%, rgba(59, 130, 246, .08), transparent 28rem); }
 
 .sql-editor {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -20,3 +20,6 @@ body { @apply bg-ink-950 text-slate-200 antialiased; }
 @keyframes pulse-dot { 0%,100% { opacity: 1;} 50% { opacity: .35;} }
 .live-dot { animation: pulse-dot 1.2s ease infinite; }
 .react-flow__handle { display: none; }
+
+@keyframes softPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.soft-pulse { animation: softPulse 2.4s ease-in-out infinite; }

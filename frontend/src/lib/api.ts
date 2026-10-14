@@ -26,10 +26,13 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     try { const body = await res.json(); detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body); } catch {}
     throw new ApiError(res.status, detail);
   }
+  // A successful DELETE (and a few infrastructure endpoints) may deliberately
+  // return no body. Avoid turning that into a misleading JSON parsing error.
+  if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   return res.json();
 }
 
-export function downloadUrl(path: string) { return path; } // exports use <a href> with token query? no — use fetch+blob below
+export function downloadUrl(path: string) { return apiUrl(path); }
 
 export async function downloadFile(path: string, filename: string) {
   const token = getToken();
@@ -39,5 +42,6 @@ export async function downloadFile(path: string, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  // Let the browser start the download before releasing the object URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

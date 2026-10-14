@@ -41,6 +41,11 @@ class RunManager:
                 run = db.get(models.ExperimentRun, run_id)
                 if run is None:
                     return
+                # A user may cancel while the worker is waiting to acquire its
+                # database session. Honour that request instead of resurrecting
+                # the queued run when this thread starts.
+                if run.status == "cancelled":
+                    return
                 run.status = "running"
                 run.started_at = datetime.now(timezone.utc)
                 db.commit()
@@ -76,8 +81,15 @@ class RunManager:
     def control(self, run_id: int, action: str) -> bool:
         with self._lock:
             handle = self._active.get(run_id)
-        if not handle or not handle.engine:
+        if not handle:
             return False
+        # A run is registered just before its worker has constructed the engine.
+        # Cancelling it in that small queued window is safe; pause/resume are not
+        # meaningful until the scheduler exists.
+        if not handle.engine:
+            if action != "cancel":
+                return False
+            return True
         if action == "pause":
             handle.engine.pause()
         elif action == "resume":
