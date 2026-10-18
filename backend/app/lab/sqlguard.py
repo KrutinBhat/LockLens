@@ -36,6 +36,11 @@ _DENY_PATTERNS = [
     r"\binto\s+outfile\b",
 ]
 _DENY_RE = re.compile("|".join(f"(?:{p})" for p in _DENY_PATTERNS), re.IGNORECASE | re.DOTALL)
+_PROBE_SIDE_EFFECT_RE = re.compile(
+    r"\b(?:nextval|setval|pg_advisory_lock|pg_advisory_xact_lock|"
+    r"pg_try_advisory_lock|pg_try_advisory_xact_lock)\s*\(",
+    re.IGNORECASE,
+)
 
 
 class SqlRejected(ValueError):
@@ -127,6 +132,16 @@ def validate_step_sql(sql: str, max_rows_hint: int = 0) -> str:
     verb = _first_verb(stmt)
     if verb not in _STEP_VERBS:
         raise SqlRejected(f"only {sorted(_STEP_VERBS)} statements are allowed in transaction steps, got {verb!r}")
+    return stmt
+
+
+def validate_select_sql(sql: str) -> str:
+    """Validate a single read-only SELECT used for probes and invariants."""
+    stmt = validate_step_sql(sql)
+    if _first_verb(stmt) != "select":
+        raise SqlRejected("probe SQL must be a SELECT statement")
+    if _PROBE_SIDE_EFFECT_RE.search(stmt):
+        raise SqlRejected("probe SQL contains a function with side effects")
     return stmt
 
 

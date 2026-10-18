@@ -171,7 +171,10 @@ def analyze(definition: dict, events: list[dict], sessions: list[dict],
 
     # Non-serializable outcome check against counterfactual serial replays.
     if serial_baselines and final_state:
-        matches = [order for order, rows in serial_baselines.items() if rows == final_state]
+        failed_replays = {order: rows for order, rows in serial_baselines.items()
+                          if rows and isinstance(rows[0], dict) and "__replay_error__" in rows[0]}
+        matches = [order for order, rows in serial_baselines.items()
+                   if order not in failed_replays and rows == final_state]
         if not matches:
             pattern_hint = ""
             edges = declared_dependency_edges(definition)
@@ -180,13 +183,21 @@ def analyze(definition: dict, events: list[dict], sessions: list[dict],
                 pattern_hint = "declared rw-antidependency pattern is consistent with write skew"
             elif "declared_ww" in kinds:
                 pattern_hint = "declared ww/rw pattern is consistent with a lost update"
-            findings.append({
-                "detector": "non_serializable_outcome", "status": "confirmed", "severity": "high",
-                "summary": "Concurrent final state matches no serial execution order of the same "
-                           f"transactions. {pattern_hint}".strip(),
-                "evidence_event_seqs": [],
-                "detail": {"final_state": final_state, "serial_baselines": serial_baselines},
-            })
+            if failed_replays:
+                findings.append({
+                    "detector": "non_serializable_outcome", "status": "inconclusive", "severity": "info",
+                    "summary": f"Could not compare against every serial order: {len(failed_replays)} replay(s) failed.",
+                    "evidence_event_seqs": [],
+                    "detail": {"final_state": final_state, "serial_baselines": serial_baselines},
+                })
+            else:
+                findings.append({
+                    "detector": "non_serializable_outcome", "status": "confirmed", "severity": "high",
+                    "summary": "Concurrent final state matches no serial execution order of the same "
+                               f"transactions. {pattern_hint}".strip(),
+                    "evidence_event_seqs": [],
+                    "detail": {"final_state": final_state, "serial_baselines": serial_baselines},
+                })
         else:
             findings.append({
                 "detector": "non_serializable_outcome", "status": "inconclusive", "severity": "info",

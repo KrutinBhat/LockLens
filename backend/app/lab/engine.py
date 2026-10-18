@@ -184,7 +184,7 @@ class LockPoller(threading.Thread):
 
 
 def _connect_lab(autocommit: bool = False) -> psycopg.Connection:
-    conn = psycopg.connect(settings.lab_database_url, autocommit=autocommit)
+    conn = psycopg.connect(settings.lab_database_url, autocommit=autocommit, connect_timeout=5)
     return conn
 
 
@@ -393,6 +393,7 @@ class ScheduleEngine:
         self.workers: list[TxWorker] = []
         self._t_start: float = 0.0
         self._t_workers_done: float = 0.0
+        self._timed_out = False
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -406,7 +407,13 @@ class ScheduleEngine:
 
     def start(self) -> None:
         self.prepare()
+        if self.cancel_event.is_set():
+            self._t_start = self._t_workers_done = time.perf_counter()
+            return
         self._reset_and_seed()
+        if self.cancel_event.is_set():
+            self._t_start = self._t_workers_done = time.perf_counter()
+            return
         self.recorder.record(None, "seeded", result={"seed_statements": len(self.definition.get("seed_sql", []))})
         self._poller = LockPoller(
             settings.lab_database_url, self._current_pids, self._poller_stop,
@@ -422,14 +429,19 @@ class ScheduleEngine:
             w.start()
 
     def join(self, timeout_s: float | None = None) -> RunResult:
-        deadline = time.monotonic() + (timeout_s or settings.run_hard_timeout_seconds)
+        deadline = time.monotonic() + (settings.run_hard_timeout_seconds if timeout_s is None else timeout_s)
         with self._workers_cond:
             while self._active_workers > 0:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    self._timed_out = True
                     self.cancel()
                     self.recorder.record(None, "timeout", result={"scope": "run"})
-                    break
+                    # Cancellation releases barriers and cancels every active
+                    # PostgreSQL backend. Wait for worker finally blocks before
+                    # collecting evidence so persisted results are complete.
+                    deadline = float("inf")
+                    continue
                 self._workers_cond.wait(min(0.2, remaining))
         self._t_workers_done = time.perf_counter()
         self._stop_poller()
@@ -510,6 +522,7 @@ class ScheduleEngine:
     def _reset_and_seed(self) -> None:
         conn = _connect_lab(autocommit=True)
         try:
+            conn.execute(f"SET statement_timeout = {int(settings.statement_timeout_ms)}")
             # The schema is provisioned by an administrator (db/init/01_lab.sql).
             # The experiment role has CREATE *inside* that schema, but deliberately
             # cannot create schemas at the database level.
@@ -532,9 +545,11 @@ class ScheduleEngine:
             conn.close()
 
     def _run_probe(self, sql: str) -> list[dict]:
-        conn = _connect_lab(autocommit=True)
+        conn = _connect_lab()
         try:
-            cur = conn.execute(sql)
+            conn.execute("SET TRANSACTION READ ONLY")
+            conn.execute(f"SET LOCAL statement_timeout = {int(settings.statement_timeout_ms)}")
+            cur = conn.execute(sqlguard.validate_select_sql(sql))
             cols = [d.name for d in cur.description]
             return [dict(zip(cols, [str(v) for v in row])) for row in cur.fetchall()]
         finally:
@@ -558,34 +573,55 @@ class ScheduleEngine:
         """Replay the named transactions serially in one connection; capture final probe."""
         conn = _connect_lab(autocommit=True)
         try:
+            conn.execute(f"SET statement_timeout = {int(settings.statement_timeout_ms)}")
             conn.execute("CREATE SCHEMA IF NOT EXISTS lab")
             rows = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='lab'").fetchall()
             for (t,) in rows:
                 conn.execute(f'DROP TABLE IF EXISTS lab."{t}" CASCADE')
             for stmt_group in self.definition.get("seed_sql", []):
                 for stmt in sqlguard.validate_seed_sql(stmt_group):
+                    conn.execute(f"SET statement_timeout = {int(settings.statement_timeout_ms)}")
                     conn.execute(stmt)
             by_name = {t["name"]: t for t in self.definition.get("transactions", [])}
             for name in order:
                 txdef = by_name[name]
                 variables: dict[str, str] = {}
-                conn.execute("BEGIN")
-                for step in txdef.get("steps", []):
-                    if step.get("kind", "sql") == "sql":
+                iso = ISOLATION_LEVELS.get(txdef.get("isolation", "READ COMMITTED").upper())
+                if iso is None:
+                    raise StepError(None, f"unsupported isolation level {txdef.get('isolation')!r}")
+                conn.execute(f"BEGIN ISOLATION LEVEL {iso}")
+                ended = False
+                steps = txdef.get("steps", [])
+                for idx, step in enumerate(steps):
+                    kind = step.get("kind", "sql")
+                    if kind == "sql":
                         sql = sqlguard.validate_step_sql(substitute_placeholders(step["sql"], variables))
+                        conn.execute(f"SET LOCAL statement_timeout = {int(settings.statement_timeout_ms)}")
                         cur = conn.execute(sql)
-                        if cur.description:
-                            rows = cur.fetchmany(settings.max_step_rows)
-                            if step.get("save_as") and rows:
-                                variables[step["save_as"]] = to_literal(rows[0][0])
-                    elif step.get("kind") == "rollback":
+                        rows = cur.fetchmany(settings.max_step_rows) if cur.description else []
+                        if step.get("save_as"):
+                            if not rows or not rows[0]:
+                                raise StepError(None, f"save_as {step['save_as']!r}: step returned no rows")
+                            variables[step["save_as"]] = to_literal(rows[0][0])
+                    elif kind == "commit":
+                        conn.commit()
+                        if idx < len(steps) - 1:
+                            conn.execute(f"BEGIN ISOLATION LEVEL {iso}")
+                        else:
+                            ended = True
+                            break
+                    elif kind == "rollback":
                         conn.rollback()
-                        conn.execute("BEGIN")
-                conn.commit()
+                        ended = True
+                        break
+                    # Checkpoints are scheduling controls and do not block a
+                    # serial counterfactual replay.
+                if not ended:
+                    conn.commit()
             probe = self.definition.get("final_state_sql")
             if not probe:
                 return []
-            cur = conn.execute(probe)
+            cur = conn.execute(sqlguard.validate_select_sql(probe))
             cols = [d.name for d in cur.description]
             return [dict(zip(cols, [str(v) for v in row])) for row in cur.fetchall()]
         finally:
@@ -598,7 +634,9 @@ class ScheduleEngine:
         for s in sessions:
             if s.backend_pid:
                 s.lock_wait_ms = round(self._wait_tracker.get(s.backend_pid, 0.0), 1)
-        if self.cancel_event.is_set():
+        if self._timed_out:
+            status = "timed_out"
+        elif self.cancel_event.is_set():
             status = "cancelled"
         else:
             status = "succeeded"
@@ -613,7 +651,7 @@ class ScheduleEngine:
                 try:
                     serial["->".join(order)] = self._serial_baseline(list(order))
                 except Exception as exc:
-                    serial["->".join(order)] = [{"error": str(exc)}]
+                    serial["->".join(order)] = [{"__replay_error__": str(exc)}]
             # leave the lab in the concurrent run's final state: re-run seed + concurrent? No —
             # serial baselines reseeded the lab. Re-apply the concurrent final state is impossible,
             # so reseed + note that serial replay was last. Instead: capture concurrent final FIRST

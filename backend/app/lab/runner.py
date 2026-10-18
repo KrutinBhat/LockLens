@@ -18,10 +18,11 @@ log = logging.getLogger("locklens.runner")
 
 
 class RunHandle:
-    def __init__(self, run_id: int, engine: ScheduleEngine, thread: threading.Thread):
+    def __init__(self, run_id: int, engine: ScheduleEngine | None, thread: threading.Thread):
         self.run_id = run_id
         self.engine = engine
         self.thread = thread
+        self.cancel_requested = False
 
 
 class RunManager:
@@ -41,19 +42,22 @@ class RunManager:
                 run = db.get(models.ExperimentRun, run_id)
                 if run is None:
                     return
-                # A user may cancel while the worker is waiting to acquire its
-                # database session. Honour that request instead of resurrecting
-                # the queued run when this thread starts.
-                if run.status == "cancelled":
-                    return
-                run.status = "running"
-                run.started_at = datetime.now(timezone.utc)
-                db.commit()
-                engine = ScheduleEngine(run.definition_snapshot, run_id=run_id)
-                engine_holder["engine"] = engine
+                # Serialize launch state changes with control requests. This
+                # closes the queued-cancel race before an engine is attached.
                 with self._lock:
-                    if run_id in self._active:
-                        self._active[run_id].engine = engine
+                    handle = self._active.get(run_id)
+                    if run.status == "cancelled" or (handle and handle.cancel_requested):
+                        run.status = "cancelled"
+                        run.finished_at = datetime.now(timezone.utc)
+                        db.commit()
+                        return
+                    run.status = "running"
+                    run.started_at = datetime.now(timezone.utc)
+                    db.commit()
+                    engine = ScheduleEngine(run.definition_snapshot, run_id=run_id)
+                    engine_holder["engine"] = engine
+                    if handle:
+                        handle.engine = engine
                 engine.start()
                 result = engine.join()
                 self._persist_result(db, run, engine, result)
@@ -81,21 +85,23 @@ class RunManager:
     def control(self, run_id: int, action: str) -> bool:
         with self._lock:
             handle = self._active.get(run_id)
-        if not handle:
-            return False
-        # A run is registered just before its worker has constructed the engine.
-        # Cancelling it in that small queued window is safe; pause/resume are not
-        # meaningful until the scheduler exists.
-        if not handle.engine:
-            if action != "cancel":
+            if not handle:
                 return False
-            return True
+            # Record the request under the same lock used by launch. This
+            # prevents the worker from slipping between the empty-engine check
+            # and the cancellation marker.
+            if not handle.engine:
+                if action != "cancel":
+                    return False
+                handle.cancel_requested = True
+                return True
+            engine = handle.engine
         if action == "pause":
-            handle.engine.pause()
+            engine.pause()
         elif action == "resume":
-            handle.engine.resume()
+            engine.resume()
         elif action == "cancel":
-            handle.engine.cancel()
+            engine.cancel()
         return True
 
     def is_active(self, run_id: int) -> bool:

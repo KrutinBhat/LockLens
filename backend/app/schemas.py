@@ -89,6 +89,12 @@ class InvariantDef(BaseModel):
     sql: str
     expect: str
 
+    @field_validator("sql")
+    @classmethod
+    def _probe_ok(cls, v):
+        sqlguard.validate_select_sql(v)
+        return v
+
 
 class ScenarioDefinition(BaseModel):
     seed_sql: list[str] = Field(min_length=1)
@@ -107,7 +113,7 @@ class ScenarioDefinition(BaseModel):
     @classmethod
     def _probe_ok(cls, v):
         if v:
-            sqlguard.validate_step_sql(v)
+            sqlguard.validate_select_sql(v)
         return v
 
     @field_validator("transactions")
