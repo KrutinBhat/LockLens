@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 120_000,
   retries: 0,
+  // Desktop and mobile projects share a mutable lab database, so run them serially.
+  workers: 1,
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:4173",
     viewport: { width: 1280, height: 800 },
