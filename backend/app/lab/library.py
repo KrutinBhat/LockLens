@@ -55,12 +55,12 @@ LIBRARY: list[dict] = [
             "transactions": [
                 {"name": "T1", "isolation": "READ COMMITTED", "steps": [
                     {"kind": "sql", "sql": "SELECT price FROM lab.products WHERE id = 1"},
-                    {"kind": "checkpoint", "name": "t2_committed"},
+                    {"kind": "checkpoint", "name": "t1_read"}, {"kind": "checkpoint", "name": "t2_committed"},
                     {"kind": "sql", "sql": "SELECT price FROM lab.products WHERE id = 1"},
                     {"kind": "commit"},
                 ]},
                 {"name": "T2", "isolation": "READ COMMITTED", "steps": [
-                    {"kind": "sql", "sql": "UPDATE lab.products SET price = 75 WHERE id = 1"},
+                    {"kind": "checkpoint", "name": "t1_read"}, {"kind": "sql", "sql": "UPDATE lab.products SET price = 75 WHERE id = 1"},
                     {"kind": "commit"},
                     {"kind": "checkpoint", "name": "t2_committed"},
                 ]},
