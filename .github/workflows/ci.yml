@@ -64,7 +64,7 @@ jobs:
           PGPASSWORD=ci_pw psql -h localhost -U locklens -d locklens_lab_test -c "CREATE SCHEMA lab AUTHORIZATION locklens_lab"
           PGPASSWORD=ci_pw psql -h localhost -U locklens -d locklens_lab_test -c "REVOKE ALL ON SCHEMA public FROM locklens_lab"
           cd ../backend && (uvicorn app.main:app --port 8000 &) && cd ../frontend
-          npm run preview &
+          npm run preview -- --host 127.0.0.1 &
           until curl --fail --silent http://127.0.0.1:8000/api/health; do sleep 1; done
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
